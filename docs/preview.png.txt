@@ -1,0 +1,2 @@
+This is a placeholder for the project preview image.
+In a real implementation, this would be a screenshot of the 3D Sound Node Visualization in action.
