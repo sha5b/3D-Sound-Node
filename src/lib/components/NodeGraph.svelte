@@ -28,7 +28,7 @@
     // If scene is initialized, update 3D objects
     if (scene) {
       updateNodeMeshes();
-      updateLinkLines();
+      updateConnectionLines();
     }
   });
 
@@ -72,25 +72,6 @@
     return mesh;
   }
   
-  // Create a link line
-  function createLinkLine(link) {
-    const geometry = new THREE.BufferGeometry();
-    const material = new THREE.LineBasicMaterial({
-      color: 0xaaaaaa,
-      opacity: 0.7,
-      transparent: true
-    });
-    
-    // Set positions (will be updated in updateLinkLine)
-    const positions = new Float32Array(6); // 2 points * 3 coordinates
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
-    const line = new THREE.Line(geometry, material);
-    scene.add(line);
-    
-    return line;
-  }
-  
   // Update node meshes based on current nodes
   function updateNodeMeshes() {
     // Remove old meshes
@@ -102,41 +83,41 @@
     nodeMeshes = nodes.map(node => createNodeMesh(node));
   }
   
-  // Update link lines based on current links
-  function updateLinkLines() {
-    // Remove old lines
+  // Create and update all connection lines
+  function updateConnectionLines() {
+    // Remove all existing lines
     for (const line of linkLines) {
       scene.remove(line);
     }
+    linkLines = [];
     
-    // Create new lines
-    linkLines = links.map(link => createLinkLine(link));
-  }
-  
-  // Update link line positions
-  function updateLinkPositions() {
-    links.forEach((link, i) => {
-      const line = linkLines[i];
-      if (!line) return;
+    // Find the central node
+    const centralNode = nodes.find(n => n.id === 'central-node');
+    if (!centralNode) return;
+    
+    // Create a line from central node to each other node
+    const otherNodes = nodes.filter(n => n.id !== 'central-node');
+    
+    otherNodes.forEach(node => {
+      // Create line geometry with start and end points
+      const points = [
+        new THREE.Vector3(centralNode.x, centralNode.y, centralNode.z),
+        new THREE.Vector3(node.x, node.y, node.z)
+      ];
       
-      const sourceNode = nodes.find(n => n.id === link.source.id || n.id === link.source);
-      const targetNode = nodes.find(n => n.id === link.target.id || n.id === link.target);
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
       
-      if (!sourceNode || !targetNode) return;
+      // Create line material
+      const material = new THREE.LineBasicMaterial({
+        color: 0xaaaaaa,
+        opacity: 0.7,
+        transparent: true
+      });
       
-      const positions = line.geometry.attributes.position.array;
-      
-      // Source point
-      positions[0] = sourceNode.x || 0;
-      positions[1] = sourceNode.y || 0;
-      positions[2] = sourceNode.z || 0;
-      
-      // Target point
-      positions[3] = targetNode.x || 0;
-      positions[4] = targetNode.y || 0;
-      positions[5] = targetNode.z || 0;
-      
-      line.geometry.attributes.position.needsUpdate = true;
+      // Create the line and add to scene
+      const line = new THREE.Line(geometry, material);
+      scene.add(line);
+      linkLines.push(line);
     });
   }
 
@@ -165,7 +146,7 @@
     
     // Create initial node meshes and link lines
     updateNodeMeshes();
-    updateLinkLines();
+    updateConnectionLines();
     
     // Add mouse event listeners
     container.addEventListener('mousemove', handleMouseMove);
@@ -175,10 +156,8 @@
     const animate = () => {
       animationId = requestAnimationFrame(animate);
       
-      // Only update link positions (nodes stay fixed)
-      if (links.length > 0 && linkLines.length > 0) {
-        updateLinkPositions();
-      }
+      // No need to update anything in the animation loop
+      // Nodes and links are static
       
       // Update controls
       controls.update();
