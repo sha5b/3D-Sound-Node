@@ -1,11 +1,22 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as THREE from 'three';
+  import type { Node, Link } from '$lib/d3/forceSimulation';
+  import { graphStore } from '$lib/stores/graphStore';
   
-  export let link;
-  export let scene;
+  export let link: Link;
+  export let scene: THREE.Scene;
   
-  let line;
+  let line: THREE.Line;
+  let nodes: Node[] = [];
+  
+  // Subscribe to graph store to get updated node positions
+  const unsubscribeGraph = graphStore.subscribe(graph => {
+    nodes = graph.nodes;
+    if (line) {
+      updateEdge();
+    }
+  });
   
   onMount(() => {
     createEdge();
@@ -15,6 +26,7 @@
     if (line && scene) {
       scene.remove(line);
     }
+    unsubscribeGraph();
   });
   
   function createEdge() {
@@ -25,11 +37,12 @@
     const positions = new Float32Array(6); // 2 points * 3 coordinates
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     
-    // Create material
+    // Create material with improved appearance
     const material = new THREE.LineBasicMaterial({
       color: 0xaaaaaa,
       opacity: 0.7,
-      transparent: true
+      transparent: true,
+      linewidth: 1
     });
     
     // Create line
@@ -45,34 +58,44 @@
   function updateEdge() {
     if (!line) return;
     
-    // Get source and target positions
+    // Find source and target nodes
+    const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+    const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+    
+    const sourceNode = nodes.find(n => n.id === sourceId);
+    const targetNode = nodes.find(n => n.id === targetId);
+    
+    // Get positions (with fallbacks)
     const sourcePos = {
-      x: link.source.x || 0,
-      y: link.source.y || 0,
-      z: link.source.z || 0
+      x: sourceNode?.x || 0,
+      y: sourceNode?.y || 0,
+      z: sourceNode?.z || 0
     };
     
     const targetPos = {
-      x: link.target.x || 0,
-      y: link.target.y || 0,
-      z: link.target.z || 0
+      x: targetNode?.x || 0,
+      y: targetNode?.y || 0,
+      z: targetNode?.z || 0
     };
     
     // Update line geometry
-    const positions = line.geometry.attributes.position.array;
-    
-    // Source point
-    positions[0] = sourcePos.x;
-    positions[1] = sourcePos.y;
-    positions[2] = sourcePos.z;
-    
-    // Target point
-    positions[3] = targetPos.x;
-    positions[4] = targetPos.y;
-    positions[5] = targetPos.z;
-    
-    // Mark the attribute as needing an update
-    line.geometry.attributes.position.needsUpdate = true;
+    const positionAttribute = line.geometry.attributes['position'];
+    if (positionAttribute) {
+      const positions = positionAttribute.array;
+      
+      // Source point
+      positions[0] = sourcePos.x;
+      positions[1] = sourcePos.y;
+      positions[2] = sourcePos.z;
+      
+      // Target point
+      positions[3] = targetPos.x;
+      positions[4] = targetPos.y;
+      positions[5] = targetPos.z;
+      
+      // Mark the attribute as needing an update
+      positionAttribute.needsUpdate = true;
+    }
   }
   
   // Update edge when link changes

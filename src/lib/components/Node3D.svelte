@@ -1,20 +1,21 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as THREE from 'three';
-  import { selectionStore } from '$lib/stores/selectionStore.js';
-  import { audioStore } from '$lib/stores/audioStore.js';
+  import { selectionStore } from '$lib/stores/selectionStore';
+  import { audioStore } from '$lib/stores/audioStore';
+  import type { Node } from '$lib/d3/forceSimulation';
   
-  export let node;
-  export let scene;
+  export let node: Node;
+  export let scene: THREE.Scene;
   
-  let mesh;
-  let audioSource;
+  let mesh: THREE.Mesh;
+  let glowMesh: THREE.Mesh;
   let isSelected = false;
-  let audioEngine;
+  let audioEngine: any;
   
   // Subscribe to selection store
   const unsubscribeSelection = selectionStore.subscribe(selection => {
-    isSelected = selection === node.id;
+    isSelected = selection.selectedNodeId === node.id;
     
     if (mesh) {
       updateNodeAppearance();
@@ -28,10 +29,6 @@
   
   onMount(() => {
     createNodeMesh();
-    
-    if (audioEngine) {
-      createAudioSource();
-    }
   });
   
   onDestroy(() => {
@@ -39,32 +36,45 @@
       scene.remove(mesh);
     }
     
-    if (audioSource) {
-      audioSource.oscillator.stop();
-      audioSource.gain.disconnect();
-      audioSource.panner.disconnect();
-    }
-    
     unsubscribeSelection();
     unsubscribeAudio();
   });
   
   function createNodeMesh() {
-    // Create geometry based on node properties
-    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const size = node.size || 0.5;
+    const geometry = new THREE.SphereGeometry(size, 32, 32);
     
-    // Create material
-    const material = new THREE.MeshStandardMaterial({
-      color: getNodeColor(),
-      metalness: 0.3,
-      roughness: 0.7,
-      emissive: isSelected ? 0x444444 : 0x000000
+    // Create a transparent material with fresnel effect
+    const material = new THREE.MeshPhysicalMaterial({
+      color: node.color || getNodeColor(),
+      metalness: 0.1,
+      roughness: 0.2,
+      transmission: 0.95, // Make it transparent
+      thickness: 0.5,     // Refraction thickness
+      envMapIntensity: 1.0,
+      clearcoat: 1.0,     // Add clearcoat layer
+      clearcoatRoughness: 0.1,
+      transparent: true,
+      opacity: isSelected ? 0.9 : 0.7
     });
     
     // Create mesh
     mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(node.x, node.y, node.z);
-    mesh.userData.nodeId = node.id;
+    mesh.position.set(node.x || 0, node.y || 0, node.z || 0);
+    mesh.userData['nodeId'] = node.id;
+    mesh.userData['nodeName'] = node.name || node.id;
+    
+    // Add a glow effect
+    const glowGeometry = new THREE.SphereGeometry(size * 1.2, 32, 32);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: node.color || getNodeColor(),
+      transparent: true,
+      opacity: isSelected ? 0.3 : 0.15,
+      side: THREE.BackSide
+    });
+    
+    glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+    mesh.add(glowMesh);
     
     // Add to scene
     scene.add(mesh);
@@ -74,42 +84,40 @@
     if (!mesh) return;
     
     // Update position
-    mesh.position.set(node.x, node.y, node.z);
+    mesh.position.set(node.x || 0, node.y || 0, node.z || 0);
     
     // Update material based on selection state
-    mesh.material.emissive.set(isSelected ? 0x444444 : 0x000000);
-    mesh.material.color.set(getNodeColor());
+    if (mesh.material instanceof THREE.MeshPhysicalMaterial) {
+      mesh.material.opacity = isSelected ? 0.9 : 0.7;
+    }
     
-    // Update audio position if available
-    if (audioSource && audioSource.panner) {
-      audioSource.panner.setPosition(node.x, node.y, node.z);
+    if (glowMesh && glowMesh.material instanceof THREE.MeshBasicMaterial) {
+      glowMesh.material.opacity = isSelected ? 0.3 : 0.15;
+    }
+    
+    // Play sound when selected
+    if (isSelected && audioEngine) {
+      audioEngine.playNode(node.id, 1.0, node.soundType as string);
     }
   }
   
   function getNodeColor() {
     // Color based on sound type
-    const colors = {
+    const colors: Record<string, number> = {
       sine: 0x4287f5,
       square: 0xf54242,
       sawtooth: 0x42f54e,
       triangle: 0xf5d442
     };
     
-    return colors[node.soundType] || 0xffffff;
-  }
-  
-  function createAudioSource() {
-    audioSource = audioEngine.createNodeSound(node);
-    
-    // Start oscillator
-    audioSource.oscillator.start();
-    
-    // Set very low gain initially
-    audioSource.gain.gain.value = 0.01;
+    const soundType = node.soundType as string || 'sine';
+    return colors[soundType] || 0xffffff;
   }
   
   // Update node when properties change
   $: if (mesh && node) {
+    // Update position from node data
+    mesh.position.set(node.x || 0, node.y || 0, node.z || 0);
     updateNodeAppearance();
   }
 </script>

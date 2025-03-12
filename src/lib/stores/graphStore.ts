@@ -1,11 +1,17 @@
 import { writable } from 'svelte/store';
+import type { Node, Link } from '$lib/d3/forceSimulation';
+
+interface GraphState {
+  nodes: Node[];
+  links: Link[];
+}
 
 /**
  * Store for managing the graph data (nodes and links)
  */
 const createGraphStore = () => {
   // Initialize with a central node and dummy data
-  const initialState = {
+  const initialState: GraphState = {
     nodes: [
       {
         id: 'central-node',
@@ -71,7 +77,7 @@ const createGraphStore = () => {
     ]
   };
   
-  const { subscribe, set, update } = writable(initialState);
+  const { subscribe, set, update } = writable<GraphState>(initialState);
   
   return {
     subscribe,
@@ -80,9 +86,9 @@ const createGraphStore = () => {
     
     /**
      * Add a new node to the graph
-     * @param {Object} node - Node to add
+     * @param {Node} node - Node to add
      */
-    addNode: (node) => {
+    addNode: (node: Node) => {
       update(graph => {
         return {
           nodes: [...graph.nodes, node],
@@ -95,14 +101,18 @@ const createGraphStore = () => {
      * Remove a node from the graph
      * @param {string} nodeId - ID of the node to remove
      */
-    removeNode: (nodeId) => {
+    removeNode: (nodeId: string) => {
       update(graph => {
         // Remove the node
         const filteredNodes = graph.nodes.filter(node => node.id !== nodeId);
         
         // Remove any links connected to this node
         const filteredLinks = graph.links.filter(
-          link => link.source.id !== nodeId && link.target.id !== nodeId
+          link => {
+            const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+            const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+            return sourceId !== nodeId && targetId !== nodeId;
+          }
         );
         
         return {
@@ -117,12 +127,16 @@ const createGraphStore = () => {
      * @param {string} sourceId - Source node ID
      * @param {string} targetId - Target node ID
      */
-    addLink: (sourceId, targetId) => {
+    addLink: (sourceId: string, targetId: string) => {
       update(graph => {
         // Check if link already exists
         const linkExists = graph.links.some(
-          link => (link.source.id === sourceId && link.target.id === targetId) || 
-                  (link.source.id === targetId && link.target.id === sourceId)
+          link => {
+            const srcId = typeof link.source === 'string' ? link.source : link.source.id;
+            const tgtId = typeof link.target === 'string' ? link.target : link.target.id;
+            return (srcId === sourceId && tgtId === targetId) || 
+                   (srcId === targetId && tgtId === sourceId);
+          }
         );
         
         if (!linkExists && sourceId !== targetId) {
@@ -141,13 +155,15 @@ const createGraphStore = () => {
      * @param {string} sourceId - Source node ID
      * @param {string} targetId - Target node ID
      */
-    removeLink: (sourceId, targetId) => {
+    removeLink: (sourceId: string, targetId: string) => {
       update(graph => {
         const filteredLinks = graph.links.filter(
-          link => !(
-            (link.source.id === sourceId && link.target.id === targetId) || 
-            (link.source.id === targetId && link.target.id === sourceId)
-          )
+          link => {
+            const srcId = typeof link.source === 'string' ? link.source : link.source.id;
+            const tgtId = typeof link.target === 'string' ? link.target : link.target.id;
+            return !((srcId === sourceId && tgtId === targetId) || 
+                     (srcId === targetId && tgtId === sourceId));
+          }
         );
         
         return {

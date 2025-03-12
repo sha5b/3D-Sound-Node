@@ -6,7 +6,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
  * @param {HTMLElement} container - DOM element to attach the renderer to
  * @returns {Object} Object containing scene, camera, renderer, and controls
  */
-export function createScene(container) {
+export function createScene(container: HTMLElement): {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  controls: OrbitControls;
+} {
   // Create scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x121212);
@@ -63,7 +68,7 @@ export function createScene(container) {
  * @param {THREE.Camera} camera - The camera to use for raycasting
  * @returns {THREE.Raycaster} The raycaster
  */
-export function createRaycaster(camera) {
+export function createRaycaster(camera: THREE.Camera): THREE.Raycaster {
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.1;
   
@@ -83,11 +88,16 @@ export function createRaycaster(camera) {
  * Performs raycasting to find intersected objects
  * @param {THREE.Raycaster} raycaster - The raycaster
  * @param {THREE.Camera} camera - The camera
- * @param {Array} objects - Array of objects to check for intersections
- * @param {Object} mouse - Object with normalized x and y coordinates
- * @returns {Array} Array of intersected objects
+ * @param {Array<THREE.Object3D>} objects - Array of objects to check for intersections
+ * @param {THREE.Vector2} mouse - Object with normalized x and y coordinates
+ * @returns {Array<THREE.Intersection>} Array of intersected objects
  */
-export function performRaycast(raycaster, camera, objects, mouse) {
+export function performRaycast(
+  raycaster: THREE.Raycaster,
+  camera: THREE.Camera,
+  objects: THREE.Object3D[],
+  mouse: THREE.Vector2
+): THREE.Intersection[] {
   raycaster.setFromCamera(mouse, camera);
   return raycaster.intersectObjects(objects, false);
 }
@@ -98,7 +108,7 @@ export function performRaycast(raycaster, camera, objects, mouse) {
  * @param {number} divisions - Number of divisions
  * @returns {THREE.GridHelper} The grid helper
  */
-export function createGridHelper(size = 20, divisions = 20) {
+export function createGridHelper(size = 20, divisions = 20): THREE.GridHelper {
   const gridHelper = new THREE.GridHelper(size, divisions, 0x555555, 0x333333);
   gridHelper.position.y = -5;
   return gridHelper;

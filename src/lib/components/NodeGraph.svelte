@@ -1,108 +1,86 @@
-<script>
+<script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import * as THREE from 'three';
-  import { createScene, createRaycaster } from '$lib/three/setup.js';
-  import { create3DForceSimulation, addNodeToSimulation, addLinkToSimulation } from '$lib/d3/forceSimulation.js';
-  import { AudioEngine } from '$lib/audio/audioEngine.js';
-  import { graphStore } from '$lib/stores/graphStore.js';
-  import { selectionStore } from '$lib/stores/selectionStore.js';
-  import { audioStore } from '$lib/stores/audioStore.js';
+  import { create3DForceSimulation } from '$lib/d3/forceSimulation';
+  import type { Node, Link } from '$lib/d3/forceSimulation';
+  import { AudioEngine } from '$lib/audio/audioEngine';
+  import { graphStore } from '$lib/stores/graphStore';
+  import { selectionStore } from '$lib/stores/selectionStore';
+  import { audioStore } from '$lib/stores/audioStore';
+  import { createRaycaster } from '$lib/three/setup';
   import Controls from './Controls.svelte';
+  import Camera3D from './Camera3D.svelte';
+  import Node3D from './Node3D.svelte';
+  import Edge3D from './Edge3D.svelte';
 
-  let container;
-  let scene, camera, renderer, controls;
-  let simulation;
-  let audioEngine;
-  let animationId;
-  let raycaster, mouse;
-  let nodes = [];
-  let links = [];
-  let nodeMeshes = [];
-  let linkLines = [];
+  let container: HTMLElement;
+  let scene: THREE.Scene;
+  let camera: THREE.PerspectiveCamera;
+  let renderer: THREE.WebGLRenderer;
+  let controls: any; // OrbitControls type
+  let cameraComponent: Camera3D;
+  let simulation: any; // d3.Simulation type
+  let audioEngine: AudioEngine;
+  let animationId: number;
+  let raycaster: THREE.Raycaster;
+  let mouse: THREE.Vector2;
+  let nodes: Node[] = [];
+  let links: Link[] = [];
+  let sceneInitialized = false;
+
+  // Lines for connections
+  let edgeLines: THREE.Line[] = [];
 
   // Subscribe to graph store
   const unsubscribeGraph = graphStore.subscribe(graph => {
     nodes = graph.nodes;
     links = graph.links;
     
-    // If scene is initialized, update 3D objects
-    if (scene) {
-      updateNodeMeshes();
-      updateConnectionLines();
+    // Update edges if scene is initialized
+    if (sceneInitialized && scene) {
+      updateEdges();
     }
   });
-
-  // Create a node mesh with fresnel effect
-  function createNodeMesh(node) {
-    const size = node.size || 0.5;
-    const geometry = new THREE.SphereGeometry(size, 32, 32);
-    
-    // Create a transparent material with fresnel effect
-    const material = new THREE.MeshPhysicalMaterial({
-      color: node.color || 0x4287f5,
-      metalness: 0.1,
-      roughness: 0.2,
-      transmission: 0.95, // Make it transparent
-      thickness: 0.5,     // Refraction thickness
-      envMapIntensity: 1.0,
-      clearcoat: 1.0,     // Add clearcoat layer
-      clearcoatRoughness: 0.1,
-      transparent: true,
-      opacity: 0.7
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(node.x || 0, node.y || 0, node.z || 0);
-    mesh.userData.nodeId = node.id;
-    mesh.userData.nodeName = node.name || node.id;
-    
-    // Add a glow effect
-    const glowGeometry = new THREE.SphereGeometry(size * 1.2, 32, 32);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: node.color || 0x4287f5,
-      transparent: true,
-      opacity: 0.15,
-      side: THREE.BackSide
-    });
-    
-    const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-    mesh.add(glowMesh);
-    
-    scene.add(mesh);
-    return mesh;
-  }
   
-  // Update node meshes based on current nodes
-  function updateNodeMeshes() {
-    // Remove old meshes
-    for (const mesh of nodeMeshes) {
-      scene.remove(mesh);
-    }
-    
-    // Create new meshes
-    nodeMeshes = nodes.map(node => createNodeMesh(node));
-  }
-  
-  // Create and update all connection lines
-  function updateConnectionLines() {
-    // Remove all existing lines
-    for (const line of linkLines) {
+  // Create and update edges
+  function updateEdges() {
+    // Remove old lines
+    for (const line of edgeLines) {
       scene.remove(line);
     }
-    linkLines = [];
+    edgeLines = [];
     
-    // Find the central node
-    const centralNode = nodes.find(n => n.id === 'central-node');
-    if (!centralNode) return;
-    
-    // Create a line from central node to each other node
-    const otherNodes = nodes.filter(n => n.id !== 'central-node');
-    
-    otherNodes.forEach(node => {
-      // Create line geometry with start and end points
+    // Create new lines for each link
+    links.forEach(link => {
+      // Find source and target nodes
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+      
+      const sourceNode = nodes.find(n => n.id === sourceId);
+      const targetNode = nodes.find(n => n.id === targetId);
+      
+      if (!sourceNode || !targetNode) return;
+      
+      // Get node meshes from scene to ensure we're using the actual positions
+      const sourceNodeMesh = scene.children.find(
+        child => child.userData && child.userData['nodeId'] === sourceId
+      ) as THREE.Mesh;
+      
+      const targetNodeMesh = scene.children.find(
+        child => child.userData && child.userData['nodeId'] === targetId
+      ) as THREE.Mesh;
+      
+      // Use mesh positions if available, otherwise fall back to node data
+      const sourcePos = sourceNodeMesh ? sourceNodeMesh.position : 
+        new THREE.Vector3(sourceNode.x || 0, sourceNode.y || 0, sourceNode.z || 0);
+      
+      const targetPos = targetNodeMesh ? targetNodeMesh.position : 
+        new THREE.Vector3(targetNode.x || 0, targetNode.y || 0, targetNode.z || 0);
+      
+      // Create line geometry
       const points = [
-        new THREE.Vector3(centralNode.x, centralNode.y, centralNode.z),
-        new THREE.Vector3(node.x, node.y, node.z)
+        sourcePos.clone(),
+        targetPos.clone()
       ];
       
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -117,21 +95,64 @@
       // Create the line and add to scene
       const line = new THREE.Line(geometry, material);
       scene.add(line);
-      linkLines.push(line);
+      edgeLines.push(line);
     });
   }
 
   onMount(() => {
-    // Initialize Three.js scene
-    ({ scene, camera, renderer, controls } = createScene(container));
+    initScene();
+    initAudio();
     
-    // Initialize raycaster for node selection
-    raycaster = createRaycaster(camera);
-    mouse = new THREE.Vector2();
+    // Add mouse event listeners
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('click', handleClick);
+    
+    // Start animation loop
+    animate();
+    
+    return () => {
+      cleanup();
+    };
+  });
+
+  function initScene() {
+    // Create scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x121212);
+    
+    // Create renderer
+    renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      alpha: true
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    // Add renderer to DOM
+    container.appendChild(renderer.domElement);
+    
+    // Add lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 1);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
     
     // Initialize D3 force simulation
     simulation = create3DForceSimulation(nodes, links);
     
+    sceneInitialized = true;
+    
+    // Delay initial edge creation to ensure nodes are positioned
+    setTimeout(() => {
+      if (scene) {
+        updateEdges();
+      }
+    }, 500);
+  }
+  
+  function initAudio() {
     // Initialize audio engine
     audioEngine = new AudioEngine();
     audioEngine.initialize();
@@ -143,48 +164,59 @@
         audioEngine.audioContext.resume();
       }
     }, { once: true });
+  }
+  
+  // Frame counter for less frequent updates
+  let frameCount = 0;
+  
+  // Flag to track if simulation is running
+  let isSimulationRunning = true;
+  
+  function animate() {
+    animationId = requestAnimationFrame(animate);
     
-    // Create initial node meshes and link lines
-    updateNodeMeshes();
-    updateConnectionLines();
-    
-    // Add mouse event listeners
-    container.addEventListener('mousemove', handleMouseMove);
-    container.addEventListener('click', handleClick);
-    
-    // Start animation loop
-    const animate = () => {
-      animationId = requestAnimationFrame(animate);
-      
-      // No need to update anything in the animation loop
-      // Nodes and links are static
-      
-      // Update controls
+    // Update controls if available
+    if (controls) {
       controls.update();
+    }
+    
+    // Run simulation for a few steps to stabilize node positions
+    if (simulation && isSimulationRunning) {
+      // Run simulation for fewer ticks (1 instead of 3)
+      simulation.tick();
       
-      // Render scene
+      // Update node meshes with new positions from simulation
+      scene.children.forEach(child => {
+        if (child.userData && child.userData['nodeId']) {
+          const nodeId = child.userData['nodeId'];
+          const node = nodes.find(n => n.id === nodeId);
+          if (node) {
+            child.position.set(node.x || 0, node.y || 0, node.z || 0);
+          }
+        }
+      });
+      
+      // Stop simulation sooner (after 50 frames instead of 100)
+      if (frameCount > 50) {
+        isSimulationRunning = false;
+        console.log('Simulation stabilized');
+      }
+    }
+    
+    // Update edges less frequently to improve performance
+    // Only update every 5 frames
+    frameCount++;
+    if (scene && frameCount % 5 === 0) {
+      updateEdges();
+    }
+    
+    // Render scene
+    if (renderer && scene && camera) {
       renderer.render(scene, camera);
-    };
-    
-    animate();
-    
-    // Handle window resize
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      container.removeEventListener('mousemove', handleMouseMove);
-      container.removeEventListener('click', handleClick);
-    };
-  });
-
-  onDestroy(() => {
+    }
+  }
+  
+  function cleanup() {
     if (animationId) {
       cancelAnimationFrame(animationId);
     }
@@ -197,143 +229,107 @@
       audioEngine.dispose();
     }
     
+    container.removeEventListener('mousemove', handleMouseMove);
+    container.removeEventListener('click', handleClick);
+    
     unsubscribeGraph();
-  });
+  }
+  
+  // Handle camera ready event
+  function handleCameraReady(event) {
+    camera = event.detail.camera;
+    controls = event.detail.controls;
+    
+    // Initialize raycaster for node selection
+    raycaster = createRaycaster(camera);
+    mouse = new THREE.Vector2();
+  }
   
   // Handle mouse move for hover effects
-  function handleMouseMove(event) {
+  function handleMouseMove(event: MouseEvent): void {
     // Calculate mouse position in normalized device coordinates
     const rect = container.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
   }
   
-  // Move camera to focus on a node
-  function focusOnNode(nodeId) {
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node) return;
-    
-    // Get current camera position
-    const startPos = new THREE.Vector3().copy(camera.position);
-    
-    // Calculate target position (slightly offset from node)
-    const targetPos = new THREE.Vector3(
-      node.x + 3,
-      node.y + 2,
-      node.z + 3
-    );
-    
-    // Animate camera movement
-    const duration = 1000; // ms
-    const startTime = Date.now();
-    
-    function animateCamera() {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      // Ease function (cubic)
-      const ease = progress < 0.5 
-        ? 4 * progress * progress * progress 
-        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      
-      // Interpolate position
-      camera.position.lerpVectors(startPos, targetPos, ease);
-      
-      // Look at the node
-      camera.lookAt(node.x, node.y, node.z);
-      
-      if (progress < 1) {
-        requestAnimationFrame(animateCamera);
-      } else {
-        // Set controls target to node position for orbiting around it
-        controls.target.set(node.x, node.y, node.z);
-      }
-    }
-    
-    animateCamera();
-  }
-  
   // Handle click for node selection
-  function handleClick(event) {
+  function handleClick(_event: MouseEvent): void {
+    if (!raycaster || !camera || !scene) return;
+    
     // Update raycaster with mouse position
     raycaster.setFromCamera(mouse, camera);
+    
+    // Get all node meshes from the scene
+    const nodeMeshes = scene.children.filter(
+      child => child.userData && child.userData['nodeId']
+    );
     
     // Check for intersections with node meshes
     const intersects = raycaster.intersectObjects(nodeMeshes);
     
     if (intersects.length > 0) {
-      const selectedMesh = intersects[0].object;
-      const nodeId = selectedMesh.userData.nodeId;
+      const selectedMesh = intersects[0].object as THREE.Mesh;
+      const nodeId = selectedMesh.userData['nodeId'] as string;
       
       // Toggle selection
       const isSelected = selectionStore.toggle(nodeId);
       
       // If node is selected, focus camera on it
-      if (isSelected) {
-        focusOnNode(nodeId);
+      if (isSelected && cameraComponent) {
+        const node = nodes.find(n => n.id === nodeId);
+        if (node) {
+          const nodePos = new THREE.Vector3(
+            node.x || 0, 
+            node.y || 0, 
+            node.z || 0
+          );
+          cameraComponent.focusOnNode(nodePos);
+        }
       }
-      
-      // Show node info
-      const nodeName = selectedMesh.userData.nodeName;
-      console.log(`Selected node: ${nodeName}`);
     } else {
       // Clear selection if clicking on empty space
       selectionStore.clear();
     }
   }
-
-  // Function to add a new node
-  function addNode() {
-    // Generate random position away from center
-    const distance = 5 + Math.random() * 5;
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
+  
+  // Handle window resize
+  function handleResize() {
+    if (!camera || !renderer) return;
     
-    const x = distance * Math.sin(phi) * Math.cos(theta);
-    const y = distance * Math.sin(phi) * Math.sin(theta);
-    const z = distance * Math.cos(phi);
-    
-    const newNode = {
-      id: `node-${nodes.length}`,
-      x: x,
-      y: y,
-      z: z,
-      soundType: ['sine', 'square', 'sawtooth', 'triangle'][Math.floor(Math.random() * 4)],
-      frequency: 220 + Math.random() * 440,
-      size: 0.3 + Math.random() * 0.3,
-      color: new THREE.Color().setHSL(Math.random(), 0.7, 0.5).getHex(),
-      name: `Audio Node ${nodes.length}`
-    };
-    
-    // Add node to graph store
-    graphStore.update(graph => {
-      const updatedNodes = [...graph.nodes, newNode];
-      
-      // Connect to central node
-      const updatedLinks = [
-        ...graph.links, 
-        { source: 'central-node', target: newNode.id }
-      ];
-      
-      return {
-        nodes: updatedNodes,
-        links: updatedLinks
-      };
-    });
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  
+  // Listen for window resize
+  $: if (camera && renderer) {
+    window.addEventListener('resize', handleResize);
   }
 </script>
 
 <div class="node-graph" bind:this={container}>
-  <!-- Three.js will render here -->
+  {#if sceneInitialized}
+    <Camera3D 
+      {scene} 
+      {container} 
+      on:ready={handleCameraReady}
+      bind:this={cameraComponent}
+    />
+    
+    {#each nodes as node (node.id)}
+      <Node3D {node} {scene} />
+    {/each}
+  {/if}
 </div>
 
 <div class="controls">
-  <Controls {addNode} />
+  <Controls />
 </div>
 
 <div class="info">
   <p>3D Sound Node Visualization</p>
-  <p>Click to select nodes | Add nodes with the button</p>
+  <p>Click to select nodes</p>
 </div>
 
 <style>

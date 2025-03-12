@@ -1,5 +1,5 @@
-<script>
-  // Global layout component
+<script lang="ts">
+  import '../app.css';
 </script>
 
 <slot />

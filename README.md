@@ -75,21 +75,21 @@ src/
 │   │   ├── Controls.svelte       # Camera and interaction controls
 │   │   └── UI/                   # UI components for interaction
 │   ├── stores/
-│   │   ├── graphStore.js         # Svelte store for graph data
-│   │   ├── selectionStore.js     # Tracks user selection state
-│   │   └── audioStore.js         # Manages audio state and processing
+│   │   ├── graphStore.ts         # Svelte store for graph data
+│   │   ├── selectionStore.ts     # Tracks user selection state
+│   │   └── audioStore.ts         # Manages audio state and processing
 │   ├── three/
-│   │   ├── setup.js              # Three.js scene initialization
-│   │   ├── raycaster.js          # Node selection handling
-│   │   ├── materials.js          # Node and edge materials
-│   │   └── effects.js            # Post-processing and visual effects
+│   │   ├── setup.ts              # Three.js scene initialization
+│   │   ├── raycaster.ts          # Node selection handling
+│   │   ├── materials.ts          # Node and edge materials
+│   │   └── effects.ts            # Post-processing and visual effects
 │   ├── audio/
-│   │   ├── audioEngine.js        # Core audio processing
-│   │   ├── nodeSound.js          # Node sound generation
-│   │   └── spatialAudio.js       # 3D audio positioning
+│   │   ├── audioEngine.ts        # Core audio processing
+│   │   ├── nodeSound.ts          # Node sound generation
+│   │   └── spatialAudio.ts       # 3D audio positioning
 │   └── d3/
-│       ├── forceSimulation.js    # 3D force-directed layout
-│       └── graphUtils.js         # Graph data structure helpers
+│       ├── forceSimulation.ts    # 3D force-directed layout
+│       └── graphUtils.ts         # Graph data structure helpers
 ├── routes/
 │   ├── +page.svelte             # Main application page
 │   ├── +layout.svelte           # App layout with global UI elements
@@ -106,18 +106,23 @@ src/
 
 The project uses Three.js for 3D rendering within a SvelteKit application:
 
-```javascript
-// Example from src/lib/three/setup.js
+```typescript
+// Example from src/lib/three/setup.ts
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-export function createScene(container) {
+export function createScene(container: HTMLElement): {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  controls: OrbitControls;
+} {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   
   container.appendChild(renderer.domElement);
   
@@ -139,22 +144,46 @@ export function createScene(container) {
 
 The project extends D3's force simulation to work in three dimensions:
 
-```javascript
-// Example from src/lib/d3/forceSimulation.js
+```typescript
+// Example from src/lib/d3/forceSimulation.ts
 import * as d3 from 'd3';
+import type { Node, Link } from '$lib/d3/forceSimulation';
 
-export function create3DForceSimulation(nodes, links) {
+export function create3DForceSimulation(nodes: Node[], links: Link[]) {
   // Extend D3's force simulation to work in 3D
-  const simulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(links).id(d => d.id).distance(5))
-    .force('charge', d3.forceManyBody().strength(-30))
-    .force('center', d3.forceCenter())
-    .force('x', d3.forceX().strength(0.02))
-    .force('y', d3.forceY().strength(0.02))
-    .force('z', d3.forceZ().strength(0.02)); // Custom Z-axis force
+  const simulation = d3.forceSimulation<Node, Link>(nodes)
+    .force('link', d3.forceLink<Node, Link>(links).id(d => d.id).distance(5))
+    .force('charge', d3.forceManyBody<Node>().strength(-30))
+    .force('center', d3.forceCenter<Node>())
+    .force('x', d3.forceX<Node>().strength(0.02))
+    .force('y', d3.forceY<Node>().strength(0.02))
+    .force('z', forceZ(0.02)); // Custom Z-axis force
     
   // Modify the tick function to update Three.js objects
   return simulation;
+}
+
+// Custom force for Z-axis in 3D space
+function forceZ(strength = 0.1) {
+  let nodes: Node[] = [];
+  let strength_ = strength;
+  let target_ = 0;
+  
+  function force(alpha: number) {
+    for (let i = 0, n = nodes.length; i < n; ++i) {
+      const node = nodes[i];
+      // Apply force toward target position
+      node.vz = node.vz || 0;
+      node.vz += alpha * strength_ * (target_ - node.z);
+      node.z += node.vz * 0.9;
+    }
+  }
+  
+  force.initialize = function(_: Node[]) {
+    nodes = _;
+  };
+  
+  return force;
 }
 ```
 
@@ -162,37 +191,62 @@ export function create3DForceSimulation(nodes, links) {
 
 The project incorporates the Web Audio API for spatial sound:
 
-```javascript
-// Example from src/lib/audio/audioEngine.js
+```typescript
+// Example from src/lib/audio/audioEngine.ts
+import type { Node } from '$lib/d3/forceSimulation';
+
 export class AudioEngine {
+  audioContext: AudioContext;
+  oscillators: Map<string, OscillatorNode>;
+  gainNodes: Map<string, GainNode>;
+  masterGain: GainNode;
+  
   constructor() {
-    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    this.oscillators = new Map();
+    this.gainNodes = new Map();
     this.masterGain = this.audioContext.createGain();
+    this.masterGain.gain.value = 0.5;
     this.masterGain.connect(this.audioContext.destination);
-    
-    // Create spatial audio listener
-    this.listener = this.audioContext.listener;
   }
   
-  createNodeSound(node) {
-    // Create oscillator or other sound source based on node properties
+  createOscillator(nodeId: string, type: OscillatorType = 'sine', frequency: number = 440): void {
+    // Stop and remove existing oscillator if it exists
+    this.stopOscillator(nodeId);
+    
+    // Create new oscillator
     const oscillator = this.audioContext.createOscillator();
-    const gain = this.audioContext.createGain();
-    const panner = this.audioContext.createPanner();
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
     
-    // Configure sound based on node properties
-    oscillator.type = node.soundType || 'sine';
-    oscillator.frequency.value = node.frequency || 440;
+    // Create gain node for this oscillator
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = 0;
     
-    // Set up spatial positioning
-    panner.setPosition(node.x, node.y, node.z);
+    // Connect oscillator to gain node and gain node to master gain
+    oscillator.connect(gainNode);
+    gainNode.connect(this.masterGain);
     
-    // Connect audio nodes
-    oscillator.connect(gain);
-    gain.connect(panner);
-    panner.connect(this.masterGain);
+    // Start oscillator
+    oscillator.start();
     
-    return { oscillator, gain, panner };
+    // Store references
+    this.oscillators.set(nodeId, oscillator);
+    this.gainNodes.set(nodeId, gainNode);
+  }
+  
+  playNode(nodeId: string, duration: number = 0.5): void {
+    const gainNode = this.gainNodes.get(nodeId);
+    
+    if (!gainNode) return;
+    
+    // Ramp up gain
+    gainNode.gain.cancelScheduledValues(this.audioContext.currentTime);
+    gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.2, this.audioContext.currentTime + 0.01);
+    
+    // Ramp down gain after duration
+    gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + duration);
   }
 }
 ```

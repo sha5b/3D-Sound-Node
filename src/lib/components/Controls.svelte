@@ -1,25 +1,19 @@
-<script>
-  export let addNode;
+<script lang="ts">
+  // No props needed anymore
 </script>
 
-<div class="controls-panel">
-  <button on:click={addNode} class="add-node-btn">
-    Add Node
-  </button>
+<div class="controls-container">
+  <!-- Add node button removed as requested -->
 </div>
 
 <style>
-  .controls-panel {
-    background-color: rgba(30, 30, 30, 0.8);
-    border-radius: 8px;
-    padding: 12px;
+  .controls-container {
     display: flex;
-    flex-direction: column;
     gap: 10px;
   }
-
-  .add-node-btn {
-    background-color: #4CAF50;
+  
+  button {
+    background-color: #4287f5;
     color: white;
     border: none;
     border-radius: 4px;
@@ -28,8 +22,12 @@
     cursor: pointer;
     transition: background-color 0.2s;
   }
-
-  .add-node-btn:hover {
-    background-color: #3e8e41;
+  
+  button:hover {
+    background-color: #2a6fd4;
+  }
+  
+  button:active {
+    background-color: #1e5bb8;
   }
 </style>
