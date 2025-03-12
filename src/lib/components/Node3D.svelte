@@ -116,14 +116,21 @@
       originalPositions.set(posAttr.array);
     }
     
-    const glowMaterial = new THREE.MeshBasicMaterial({
+    // Create a glass-like material without metalness or reflections
+    const glowMaterial = new THREE.MeshPhysicalMaterial({
       color: node.color || getNodeColor(),
       transparent: true,
-      opacity: isSelected ? 0.3 : 0.15,
+      opacity: isSelected ? 0.7 : 0.4,
+      roughness: 0.2,           // Slightly higher roughness to reduce reflections
+      metalness: 0.0,           // No metalness
+      clearcoat: 0.5,           // Reduced clearcoat
+      clearcoatRoughness: 0.2,  // Slightly rougher clearcoat
+      transmission: 0.9,        // High transmission for glass-like transparency
+      ior: 1.4,                 // Index of refraction
+      reflectivity: 0.1,        // Very low reflectivity as requested
       side: THREE.DoubleSide,
-      wireframe: false,
-      depthWrite: false, // Don't write to depth buffer so it doesn't interfere with raycasting
-      depthTest: false   // Don't test against depth buffer
+      depthWrite: true,
+      depthTest: true
     });
     
     glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
