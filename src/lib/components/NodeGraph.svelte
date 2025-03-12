@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import * as THREE from 'three';
   import { create3DForceSimulation } from '$lib/d3/forceSimulation';
   import type { Node, Link } from '$lib/d3/forceSimulation';
@@ -11,7 +11,6 @@
   import Controls from './Controls.svelte';
   import Camera3D from './Camera3D.svelte';
   import Node3D from './Node3D.svelte';
-  import Edge3D from './Edge3D.svelte';
 
   let container: HTMLElement;
   let scene: THREE.Scene;
@@ -99,13 +98,19 @@
     });
   }
 
+  // Track mouse state for distinguishing between clicks and drags
+  let mouseDownPosition = new THREE.Vector2();
+  let isMouseDown = false;
+  let isDragging = false;
+  
   onMount(() => {
     initScene();
     initAudio();
     
     // Add mouse event listeners
     container.addEventListener('mousemove', handleMouseMove);
-    container.addEventListener('click', handleClick);
+    container.addEventListener('mousedown', handleMouseDown);
+    container.addEventListener('mouseup', handleMouseUp);
     
     // Start animation loop
     animate();
@@ -216,6 +221,39 @@
     }
   }
   
+  // Handle mouse down event
+  function handleMouseDown(event: MouseEvent): void {
+    isMouseDown = true;
+    isDragging = false;
+    
+    // Store mouse down position
+    const rect = container.getBoundingClientRect();
+    mouseDownPosition.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+    mouseDownPosition.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+  }
+  
+  // Handle mouse up event
+  function handleMouseUp(event: MouseEvent): void {
+    if (isMouseDown) {
+      // Calculate distance moved
+      const rect = container.getBoundingClientRect();
+      const mouseUpX = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+      const mouseUpY = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+      
+      const dx = mouseUpX - mouseDownPosition.x;
+      const dy = mouseUpY - mouseDownPosition.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // If mouse hasn't moved much, consider it a click
+      if (distance < 0.02) {
+        handleClick(event);
+      }
+      
+      isMouseDown = false;
+      isDragging = false;
+    }
+  }
+  
   function cleanup() {
     if (animationId) {
       cancelAnimationFrame(animationId);
@@ -230,13 +268,14 @@
     }
     
     container.removeEventListener('mousemove', handleMouseMove);
-    container.removeEventListener('click', handleClick);
+    container.removeEventListener('mousedown', handleMouseDown);
+    container.removeEventListener('mouseup', handleMouseUp);
     
     unsubscribeGraph();
   }
   
   // Handle camera ready event
-  function handleCameraReady(event) {
+  function handleCameraReady(event: CustomEvent<{camera: THREE.PerspectiveCamera, controls: any}>) {
     camera = event.detail.camera;
     controls = event.detail.controls;
     
@@ -277,12 +316,12 @@
       
       // If node is selected, focus camera on it
       if (isSelected && cameraComponent) {
-        const node = nodes.find(n => n.id === nodeId);
-        if (node) {
+        const foundNode = nodes.find(n => n.id === nodeId);
+        if (foundNode) {
           const nodePos = new THREE.Vector3(
-            node.x || 0, 
-            node.y || 0, 
-            node.z || 0
+            foundNode.x || 0, 
+            foundNode.y || 0, 
+            foundNode.z || 0
           );
           cameraComponent.focusOnNode(nodePos);
         }

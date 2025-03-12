@@ -52,7 +52,7 @@
     dispatch('ready', { camera, controls });
   }
   
-  // Improved function to focus on a node
+  // Improved function to focus on a node with smoother animation
   export function focusOnNode(nodePosition: THREE.Vector3) {
     if (!camera || !controls) return;
     
@@ -60,28 +60,29 @@
     const startPos = new THREE.Vector3().copy(camera.position);
     const startTarget = new THREE.Vector3().copy(controls.target);
     
-    // Calculate a better target position that's directly in front of the node
-    // This is the key fix for the camera positioning issue
-    const direction = new THREE.Vector3(0, 0, 1).normalize();
-    const distance = 8; // Fixed distance from node
-    const targetPos = new THREE.Vector3().copy(nodePosition).add(
-      direction.multiplyScalar(distance)
-    );
+    // Calculate the direction from the camera to the node
+    const cameraToNode = new THREE.Vector3().subVectors(nodePosition, startPos).normalize();
+    
+    // Calculate a better camera position that's at a fixed distance from the node
+    // but maintains the current viewing angle
+    const distance = 5; // Closer distance for better view
+    const offset = new THREE.Vector3().copy(cameraToNode).multiplyScalar(-distance);
+    const targetPos = new THREE.Vector3().copy(nodePosition).add(offset);
     
     // Animate camera movement
-    const duration = 1200; // ms
+    const duration = 1500; // Longer duration for smoother animation
     const startTime = Date.now();
     
     function animateCamera() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      // Smooth easing function
+      // Improved smooth easing function
       const ease = progress < 0.5 
         ? 4 * progress * progress * progress 
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
       
-      // Interpolate position
+      // Interpolate position with smoother curve
       camera.position.lerpVectors(startPos, targetPos, ease);
       
       // Interpolate target (this is key for smooth camera movement)
@@ -96,6 +97,9 @@
       } else {
         // Ensure controls target is exactly at node position
         controls.target.copy(nodePosition);
+        
+        // Update controls to reflect new state
+        controls.update();
       }
     }
     
