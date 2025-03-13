@@ -32,13 +32,16 @@
   const nVertices = (frequencySamples + 1) * (timeSamples + 1);
   let heights = new Uint8Array(nVertices);
   
-  // Dimensions
+  // Dimensions - smaller size for node-based visualization
   let xSegments = timeSamples;
   let ySegments = frequencySamples;
-  let xSize = 40;
-  let ySize = 20;
+  let xSize = 10; // Reduced from 40
+  let ySize = 5;  // Reduced from 20
   let xHalfSize = xSize / 2;
   let yHalfSize = ySize / 2;
+  
+  // Grid parameters
+  let gridHelper: THREE.GridHelper | null = null;
   
   // Animation
   let animationFrameId: number;
@@ -93,6 +96,23 @@
     return colors.map(color => new THREE.Vector3(color.r, color.g, color.b));
   }
   
+  // Create 3D grid for scale reference
+  function createGrid(size: number, divisions: number, position: THREE.Vector3) {
+    // Remove existing grid if any
+    if (gridHelper) {
+      scene.remove(gridHelper);
+    }
+    
+    // Create new grid
+    gridHelper = new THREE.GridHelper(size, divisions, 0x444444, 0x222222);
+    gridHelper.position.copy(position);
+    
+    // Add to scene
+    scene.add(gridHelper);
+    
+    return gridHelper;
+  }
+
   // Create 3D spectrogram mesh
   function createSpectrogram() {
     // Create buffer geometry
@@ -150,9 +170,14 @@
     // Create mesh
     spectrogramMesh = new THREE.Mesh(geometry, material);
     
-    // Position and rotate for better viewing
-    spectrogramMesh.position.set(0, 0, 0);
-    spectrogramMesh.rotation.x = -Math.PI / 4; // 45 degrees
+    // Set rotation to -45 degrees around X axis (to match the reference image)
+    spectrogramMesh.rotation.x = -Math.PI / 4; // -45 degrees
+    
+    // Adjust the height to be lower
+    spectrogramMesh.position.y = -2;
+    
+    // Initially hide the spectrogram until a node is clicked
+    spectrogramMesh.visible = false;
     
     // Add to scene
     scene.add(spectrogramMesh);
@@ -199,6 +224,9 @@
     directionalLight.position.set(1, 1, 1);
     scene.add(directionalLight);
     
+    // Create a global 3D grid that's always visible
+    createGrid(20, 20, new THREE.Vector3(0, 0, 0));
+    
     // Create 3D spectrogram
     createSpectrogram();
     
@@ -243,21 +271,12 @@
   
   // Create visualizer for a node
   function createNodeVisualizer(node: Node) {
-    // Create a grid geometry for the spectrogram
-    const gridSize = 8;
-    const gridSegments = 64;
-    const geometry = new THREE.PlaneGeometry(
-      gridSize, // Width
-      gridSize, // Height
-      gridSegments, // Width segments
-      gridSegments // Height segments
-    );
-    
-    // Create material with wireframe
+    // Create a small sphere to indicate the node position
+    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
     const material = new THREE.MeshPhongMaterial({
       color: node.color || 0x00ff00,
-      wireframe: true,
-      side: THREE.DoubleSide,
+      emissive: node.color || 0x00ff00,
+      emissiveIntensity: 0.5,
       shininess: 30
     });
     
@@ -270,9 +289,6 @@
       node.position.y,
       node.position.z
     ));
-    
-    // Rotate to show the 3D spectrogram properly
-    visualizer.rotation.x = -Math.PI / 4; // 45 degrees
     
     // Add to scene
     scene.add(visualizer);
@@ -322,7 +338,7 @@
     if (!frequencyData) return;
     
     // Update 3D spectrogram if it exists
-    if (spectrogramMesh) {
+    if (spectrogramMesh && spectrogramMesh.visible) {
       // Shift existing data to make room for new data
       // This creates the moving history effect
       const startVal = frequencySamples + 1;
@@ -339,55 +355,28 @@
         spectrogramMesh.geometry.setAttribute('displacement', 
           new THREE.Uint8BufferAttribute(heights, 1));
       }
-    }
-    
-    // Also update the node visualizer if active
-    if (activeNodeId) {
-      const visualizer = nodeVisualizers.get(activeNodeId);
-      if (!visualizer) return;
       
-      // Get the position attribute of the geometry
-      const positions = visualizer.geometry.attributes.position;
-      
-      // Update the y-coordinate of each vertex based on audio data
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i);
-        const z = positions.getZ(i);
-        
-        // Calculate the distance from the center
-        const distance = Math.sqrt(x * x + z * z);
-        
-        // Get the frequency data index based on the vertex position
-        const dataIndex = Math.min(
-          Math.floor(Math.abs(x / 4 + 0.5) * frequencyData.length),
-          frequencyData.length - 1
-        );
-        
-        // Calculate the new y position based on frequency data
-        let y = (frequencyData[dataIndex] / 255) * 3;
-        
-        // Apply falloff based on distance from center
-        const falloff = Math.max(0, 1 - distance / 4);
-        y *= falloff;
-        
-        // Set the new position
-        positions.setY(i, y);
+      // Update active node visualizer color based on audio intensity
+      if (activeNodeId) {
+        const visualizer = nodeVisualizers.get(activeNodeId);
+        if (visualizer) {
+          // Calculate average intensity
+          const maxIntensity = Math.max(...Array.from(frequencyData));
+          const normalizedIntensity = maxIntensity / 255;
+          
+          // Create a color gradient from blue to red based on intensity
+          const color = new THREE.Color();
+          color.setHSL(0.6 - normalizedIntensity * 0.6, 1.0, 0.5);
+          
+          // Update material color and emissive
+          (visualizer.material as THREE.MeshPhongMaterial).color = color;
+          (visualizer.material as THREE.MeshPhongMaterial).emissive = color;
+          
+          // Pulse the size based on intensity
+          const scale = 0.5 + normalizedIntensity * 0.5;
+          visualizer.scale.set(scale, scale, scale);
+        }
       }
-      
-      // Update the geometry
-      positions.needsUpdate = true;
-      visualizer.geometry.computeVertexNormals();
-      
-      // Update color based on intensity
-      const maxIntensity = Math.max(...Array.from(frequencyData));
-      const normalizedIntensity = maxIntensity / 255;
-      
-      // Create a color gradient from blue to red based on intensity
-      const color = new THREE.Color();
-      color.setHSL(0.6 - normalizedIntensity * 0.6, 1.0, 0.5);
-      
-      // Update material color
-      (visualizer.material as THREE.MeshPhongMaterial).color = color;
     }
   }
 
@@ -480,20 +469,31 @@
     if (activeNodeId) {
       const prevVisualizer = nodeVisualizers.get(activeNodeId);
       if (prevVisualizer) {
-        // Reset visualizer
-        const positions = prevVisualizer.geometry.attributes.position;
-        for (let i = 0; i < positions.count; i++) {
-          positions.setY(i, 0);
-        }
-        positions.needsUpdate = true;
+        // Reset visualizer scale
+        prevVisualizer.scale.set(1, 1, 1);
         
         // Reset color
-        (prevVisualizer.material as THREE.MeshPhongMaterial).color.set(0x00ff00);
+        const prevNode = getNodeById(activeNodeId);
+        if (prevNode) {
+          (prevVisualizer.material as THREE.MeshPhongMaterial).color.set(prevNode.color || 0x00ff00);
+          (prevVisualizer.material as THREE.MeshPhongMaterial).emissive.set(prevNode.color || 0x00ff00);
+        }
+      }
+      
+      // Hide the previous node's visualizer
+      if (spectrogramMesh) {
+        spectrogramMesh.visible = false;
       }
     }
     
     // Set active node
     activeNodeId = node.id;
+    
+    // Get node position
+    const nodeObject = nodeObjects.get(node.id);
+    if (!nodeObject) return;
+    
+    const nodePosition = nodeObject.position.clone();
     
     // Reset 3D spectrogram data
     if (spectrogramMesh) {
@@ -505,6 +505,17 @@
         spectrogramMesh.geometry.setAttribute('displacement', 
           new THREE.Uint8BufferAttribute(heights, 1));
       }
+      
+      // Position the spectrogram at the node
+      spectrogramMesh.position.copy(nodePosition);
+      
+      // Make the spectrogram visible
+      spectrogramMesh.visible = true;
+    }
+    
+    // Update the grid position to match the node
+    if (gridHelper) {
+      gridHelper.position.copy(nodePosition);
     }
     
     // Play the audio
@@ -512,9 +523,13 @@
     
     // Move camera to view the 3D spectrogram
     if (spectrogramMesh) {
-      // Animate camera to view the spectrogram
+      // Calculate camera position to view the spectrogram
+      const targetPosition = nodePosition.clone().add(
+        new THREE.Vector3(0, 5, 15)
+      );
+      
+      // Animate camera movement
       const startPosition = camera.position.clone();
-      const targetPosition = new THREE.Vector3(0, 20, 60);
       const startTime = Date.now();
       const duration = 1000; // 1 second
       
@@ -533,15 +548,15 @@
           easeProgress
         );
         
-        // Look at the spectrogram
-        camera.lookAt(0, 0, 0);
+        // Look at the node
+        camera.lookAt(nodePosition);
         
         // Continue animation if not complete
         if (progress < 1) {
           requestAnimationFrame(animateCamera);
         } else {
           // Update controls target
-          controls.target.set(0, 0, 0);
+          controls.target.copy(nodePosition);
         }
       }
       

@@ -62,6 +62,7 @@ export class AudioService {
     // Create new audio element
     this.audioElement = new Audio(audioFile);
     this.audioElement.crossOrigin = 'anonymous';
+    this.audioElement.loop = true; // Make audio loop
     
     // Create and connect source
     this.source = this.audioContext.createMediaElementSource(this.audioElement);
